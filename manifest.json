@@ -1,0 +1,10 @@
+{
+	"id": "bullet-canvas-drag",
+	"name": "Bullet Canvas Drag",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Enables dragging a bullet point from a note file outline into a canvas",
+	"author": "Ana Cardenas",
+	"authorUrl": "https://amcard.myportfolio.com/",
+	"isDesktopOnly": true
+}
