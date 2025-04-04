@@ -181,12 +181,19 @@ export default class CustomBulletDragPlugin extends Plugin {
 	};
 
 	async updateBulletInFile(bulletTextRaw: string, id: string, file: TFile): Promise<void> {
-		// Remove zero-width spaces before processing
+		// Remove zero-width spaces.
 		const sanitizedText = bulletTextRaw.replace(/\u200B/g, '');
-		const bulletText = sanitizedText.replace(/^-\s*/, "").trim();
+		// Remove the bullet marker and trim to get the main text.
+		const mainBulletText = sanitizedText.replace(/^-\s*/, "").trim();
+		// Use the first 50 characters as a snippet to find the corresponding line in the file.
+		const snippet = mainBulletText.slice(0, 50);
+		// Read the file content.
 		const content = await this.app.vault.read(file);
-		const regex = new RegExp(`^(\\s*-\\s*${this.escapeRegex(bulletText)})(?!\\s*\\^)`, "m");
-		const replacement = `$1 ^${id}`;
+		// Build a regex that matches a bullet line that contains the snippet and does not already have an id.
+		// This regex captures the entire line (group 1) and any trailing whitespace (group 2).
+		const regex = new RegExp(`^(\\s*-.*${this.escapeRegex(snippet)}.*?)(?!\\s*\\^)(\\s*)$`, "m");
+		// Append the id at the very end of the line.
+		const replacement = `$1 ^${id}$2`;
 		const newContent = content.replace(regex, replacement);
 		if (newContent !== content) {
 			await this.app.vault.modify(file, newContent);
