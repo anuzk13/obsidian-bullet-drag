@@ -1,4 +1,4 @@
-import { Plugin } from 'obsidian';
+import { Plugin, WorkspaceLeaf, TFile } from "obsidian";
 
 interface DragState {
 	initialX: number;
@@ -11,7 +11,7 @@ interface DragState {
 const MAX_TEXT_LENGTH = 30;
 function truncateText(text: string, maxLen = MAX_TEXT_LENGTH): string {
 	if (text.length <= maxLen) return text;
-	return text.slice(0, maxLen - 3) + '...';
+	return text.slice(0, maxLen - 3) + "...";
 }
 
 export default class CustomBulletDragPlugin extends Plugin {
@@ -20,14 +20,16 @@ export default class CustomBulletDragPlugin extends Plugin {
 	onload() {
 		console.log("CustomBulletDragPlugin loaded.");
 
-		// Register our event listeners in capture mode.
+		// Register event listeners.
 		document.addEventListener("mousedown", this.onMouseDown, true);
 		document.addEventListener("mousemove", this.onMouseMove, true);
 		document.addEventListener("mouseup", this.onMouseUp, true);
 
-		// For hover: change the cursor to a hand if Alt is held down on a bullet line.
 		document.body.addEventListener("mouseover", this.onMouseOverBullet, true);
 		document.body.addEventListener("mouseout", this.onMouseOutBullet, true);
+
+		// Optional: add a global error handler to suppress benign ResizeObserver errors.
+		window.addEventListener("error", this.globalErrorHandler, true);
 	}
 
 	onunload() {
@@ -37,12 +39,17 @@ export default class CustomBulletDragPlugin extends Plugin {
 		document.removeEventListener("mouseup", this.onMouseUp, true);
 		document.body.removeEventListener("mouseover", this.onMouseOverBullet, true);
 		document.body.removeEventListener("mouseout", this.onMouseOutBullet, true);
+		window.removeEventListener("error", this.globalErrorHandler, true);
 	}
 
-	/**
-	 * On mouseover: if Alt is pressed and the hovered element is a bullet line,
-	 * change its cursor to "grab."
-	 */
+	globalErrorHandler = (event: ErrorEvent): boolean => {
+		if (event.message && event.message.includes("ResizeObserver loop completed with undelivered notifications")) {
+			event.stopImmediatePropagation();
+			return false;
+		}
+		return true;
+	};
+
 	onMouseOverBullet = (e: MouseEvent) => {
 		if (!e.altKey) return;
 		const targetEl = e.target as HTMLElement;
@@ -52,9 +59,6 @@ export default class CustomBulletDragPlugin extends Plugin {
 		}
 	};
 
-	/**
-	 * On mouseout: reset the cursor style.
-	 */
 	onMouseOutBullet = (e: MouseEvent) => {
 		const targetEl = e.target as HTMLElement;
 		const bulletEl = targetEl.closest(".cm-line") as HTMLElement | null;
@@ -63,10 +67,6 @@ export default class CustomBulletDragPlugin extends Plugin {
 		}
 	};
 
-	/**
-	 * On mousedown, require Alt to be pressed. If the click occurs on a bullet line,
-	 * record the initial coordinates and source element.
-	 */
 	onMouseDown = (e: MouseEvent) => {
 		if (!e.altKey) return; // Only initiate drag if Alt is held.
 		const targetEl = e.target as HTMLElement;
@@ -80,43 +80,35 @@ export default class CustomBulletDragPlugin extends Plugin {
 				previewEl: null,
 			};
 			console.log("Alt+mousedown on bullet:", bulletEl.textContent.trim());
-			// Prevent further processing (like text editing) for this event.
 			e.preventDefault();
 			e.stopPropagation();
 		}
 	};
 
-	/**
-	 * On mousemove, if a drag has been initiated, check if the pointer has moved enough
-	 * to start dragging. Once dragging starts, create a floating "pill" that follows the mouse.
-	 */
 	onMouseMove = (e: MouseEvent) => {
 		if (!this.dragState) return;
-
 		const dx = e.clientX - this.dragState.initialX;
 		const dy = e.clientY - this.dragState.initialY;
 		const distance = Math.sqrt(dx * dx + dy * dy);
-		const DRAG_THRESHOLD = 5; // pixels
+		const DRAG_THRESHOLD = 5;
 
 		if (!this.dragState.dragging && distance > DRAG_THRESHOLD) {
 			this.dragState.dragging = true;
-			// Change the source bullet's cursor to "grabbing."
 			this.dragState.sourceEl.style.cursor = "grabbing";
 
-			// Create a floating preview "pill" element.
+			// Create a floating preview pill.
 			const preview = document.createElement("div");
 			preview.style.position = "fixed";
 			preview.style.top = e.clientY + "px";
 			preview.style.left = e.clientX + "px";
 			preview.style.zIndex = "10000";
 			preview.style.pointerEvents = "none";
-			// Style as a pill.
 			preview.style.display = "inline-flex";
 			preview.style.alignItems = "center";
 			preview.style.borderRadius = "16px";
 			preview.style.backgroundColor = "var(--background-secondary, rgba(0,0,0,0.1))";
 			preview.style.color = "var(--text-normal, #000)";
-			preview.style.boxShadow = "0 2px 6px rgba(0, 0, 0, 0.2)";
+			preview.style.boxShadow = "0 2px 6px rgba(0,0,0,0.2)";
 			preview.style.padding = "4px 8px";
 			preview.style.fontSize = "0.9em";
 			preview.style.maxWidth = "200px";
@@ -124,14 +116,13 @@ export default class CustomBulletDragPlugin extends Plugin {
 			preview.style.textOverflow = "ellipsis";
 			preview.style.whiteSpace = "nowrap";
 
-			// Create an icon element for the bullet (replace "•" with your preferred icon).
 			const iconSpan = document.createElement("span");
 			iconSpan.textContent = "•";
 			iconSpan.style.marginRight = "6px";
 			preview.appendChild(iconSpan);
 
-			// Add the bullet text (truncated and without the initial dash).
-			const bulletText = this.dragState.sourceEl.textContent?.trim().replace(/^-\s*/, "") || "";
+			const bulletTextRaw = this.dragState.sourceEl.textContent?.trim() || "";
+			const bulletText = bulletTextRaw.replace(/^-\s*/, "");
 			const textSpan = document.createElement("span");
 			textSpan.textContent = truncateText(bulletText);
 			preview.appendChild(textSpan);
@@ -143,32 +134,99 @@ export default class CustomBulletDragPlugin extends Plugin {
 		}
 
 		if (this.dragState.dragging && this.dragState.previewEl) {
-			// Update the position of the preview pill.
 			this.dragState.previewEl.style.top = e.clientY + 10 + "px";
 			this.dragState.previewEl.style.left = e.clientX + 10 + "px";
 			e.preventDefault();
 		}
 	};
 
-	/**
-	 * On mouseup, if dragging was active, remove the preview and log the drop.
-	 * Reset the source element's cursor style.
-	 */
-	onMouseUp = (e: MouseEvent) => {
+	onMouseUp = async (e: MouseEvent) => {
 		if (!this.dragState) return;
-
 		const wasDragging = this.dragState.dragging;
-		const bulletText = this.dragState.sourceEl.textContent?.trim() || "";
+		const bulletTextRaw = this.dragState.sourceEl.textContent?.trim() || "";
+		const bulletText = bulletTextRaw.replace(/^-\s*/, "");
 		if (wasDragging) {
 			console.log("Dropped bullet:", bulletText);
 			if (this.dragState.previewEl) {
 				document.body.removeChild(this.dragState.previewEl);
 			}
+			const file = this.app.workspace.getActiveFile();
+			if (file && file.extension === "md") {
+				let id = "";
+				if (bulletTextRaw.indexOf("^") !== -1) {
+					id = bulletTextRaw.slice(bulletTextRaw.indexOf("^") + 1).trim();
+				} else {
+					id = this.generateBulletId();
+					console.log("Generated new bullet id:", id);
+					await this.updateBulletInFile(bulletTextRaw, id, file);
+				}
+				const fileNameNoExt = file.name.replace(/\.md$/, "");
+				const linkReference = `![[${fileNameNoExt}#^${id}]]`;
+				console.log("Creating canvas node with link:", linkReference, "at", e.clientX, e.clientY);
+				this.addCanvasNode(linkReference, e.clientX, e.clientY);
+			} else {
+				console.log("No valid markdown file active.");
+			}
 		} else {
 			console.log("Mouse up without dragging on bullet:", bulletText);
 		}
-		// Reset the cursor on the source element.
 		this.dragState.sourceEl.style.cursor = "";
 		this.dragState = null;
 	};
+
+	/**
+	 * Creates a canvas node whose text is set to the provided linkReference.
+	 * This method uses the (undocumented) createTextNode API on the canvas.
+	 */
+	addCanvasNode(linkReference: string, x: number, y: number) {
+		const canvasLeaves = this.app.workspace.getLeavesOfType("canvas");
+		const canvasLeaf = canvasLeaves.find((leaf) => {
+			const canvasView = leaf.view as any;
+			if (canvasView && canvasView.getViewType && canvasView.getViewType() === "canvas") {
+				const canvasEl = canvasView.containerEl;
+				const rect = canvasEl.getBoundingClientRect();
+				return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+			}
+			return false;
+		});
+		if (canvasLeaf) {
+			const canvasView = canvasLeaf.view as any;
+			// Use createTextNode instead of createFileNode or createNode.
+			if (typeof canvasView.canvas.createTextNode === "function") {
+				canvasView.canvas.createTextNode({
+					pos: { x, y },
+					text: linkReference,
+					save: true,
+					focus: true,
+				});
+				console.log("Node added to canvas.");
+			} else {
+				console.error("createTextNode API is not available on canvas.");
+			}
+		} else {
+			console.log("No canvas found under drop coordinates.");
+		}
+	}
+
+	async updateBulletInFile(bulletTextRaw: string, id: string, file: TFile): Promise<void> {
+		const content = await this.app.vault.read(file);
+		const escaped = this.escapeRegex(bulletTextRaw);
+		const regex = new RegExp(`^(${escaped})(?!\\s*\\^)`, "m");
+		const replacement = `$1 ^${id}`;
+		const newContent = content.replace(regex, replacement);
+		if (newContent !== content) {
+			await this.app.vault.modify(file, newContent);
+			console.log("Updated bullet in file with id:", id);
+		} else {
+			console.log("Bullet line was not updated; it may already have an id.");
+		}
+	}
+
+	escapeRegex(str: string): string {
+		return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	}
+
+	generateBulletId(): string {
+		return `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+	}
 }
