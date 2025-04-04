@@ -181,8 +181,10 @@ export default class CustomBulletDragPlugin extends Plugin {
 	};
 
 	async updateBulletInFile(bulletTextRaw: string, id: string, file: TFile): Promise<void> {
+		// Remove zero-width spaces before processing
+		const sanitizedText = bulletTextRaw.replace(/\u200B/g, '');
+		const bulletText = sanitizedText.replace(/^-\s*/, "").trim();
 		const content = await this.app.vault.read(file);
-		const bulletText = bulletTextRaw.replace(/^-\s*/, "").trim();
 		const regex = new RegExp(`^(\\s*-\\s*${this.escapeRegex(bulletText)})(?!\\s*\\^)`, "m");
 		const replacement = `$1 ^${id}`;
 		const newContent = content.replace(regex, replacement);
@@ -193,6 +195,7 @@ export default class CustomBulletDragPlugin extends Plugin {
 			console.log("Bullet line was not updated; it may already have an id.");
 		}
 	}
+	
 
 	escapeRegex(str: string): string {
 		return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
