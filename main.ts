@@ -11,6 +11,9 @@ interface DragState {
     editor: Editor; // Active editor instance
     lineNumber: number; // Line number in the editor being dragged (0-based)
     rawLineText: string; // Raw text content of the dragged line
+    // Track if pointer is over a canvas and store a reference to the icon span.
+    overCanvas: boolean;
+    iconSpan: HTMLElement | null;
 }
 
 const MAX_TEXT_LENGTH = 30; // Max length for preview text
@@ -138,6 +141,8 @@ export default class CustomBulletDragPlugin extends Plugin {
             editor: editor,
             lineNumber: lineNumber,
             rawLineText: rawLineText,
+            overCanvas: false,
+            iconSpan: null,
         };
 
         console.log(`CustomBulletDrag: Alt+mousedown on line ${lineNumber}: "${rawLineText}"`);
@@ -183,10 +188,12 @@ export default class CustomBulletDragPlugin extends Plugin {
             preview.style.fontFamily = "var(--font-interface)";
 
             const iconSpan = document.createElement("span");
-            iconSpan.textContent = "•";
+            iconSpan.textContent = "•"; // default icon
             iconSpan.style.marginRight = "8px";
             iconSpan.style.color = "var(--text-muted)";
             preview.appendChild(iconSpan);
+            // NEW: store iconSpan reference
+            this.dragState.iconSpan = iconSpan;
 
             const bulletTextRaw = this.dragState.rawLineText.trim();
             const bulletText = bulletTextRaw.replace(/^-\s*/, "");
@@ -203,6 +210,24 @@ export default class CustomBulletDragPlugin extends Plugin {
         if (this.dragState.dragging && this.dragState.previewEl) {
             this.dragState.previewEl.style.left = e.clientX + 10 + "px";
             this.dragState.previewEl.style.top = e.clientY + 10 + "px";
+
+            // check if mouse is over a Canvas and update the icon accordingly
+            let overCanvas = false;
+            const canvasLeaves = this.app.workspace.getLeavesOfType("canvas");
+            for (const leaf of canvasLeaves) {
+                const canvasView = leaf.view as CanvasView;
+                if (canvasView && canvasView.getViewType && canvasView.getViewType() === "canvas" && canvasView.containerEl) {
+                    const rect = canvasView.containerEl.getBoundingClientRect();
+                    if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+                        overCanvas = true;
+                        break;
+                    }
+                }
+            }
+            this.dragState.overCanvas = overCanvas;
+            if (this.dragState.iconSpan) {
+                this.dragState.iconSpan.textContent = overCanvas ? "+" : "•";
+            }
             e.preventDefault();
         }
     };
@@ -213,7 +238,7 @@ export default class CustomBulletDragPlugin extends Plugin {
     onMouseUp = async (e: MouseEvent) => {
         if (!this.dragState) return;
 
-        const { editor, lineNumber, sourceEl, dragging } = this.dragState;
+        const { editor, lineNumber, sourceEl, dragging, overCanvas } = this.dragState;
         const initialRawLineText = this.dragState.rawLineText;
 
         sourceEl.style.userSelect = "";
@@ -225,6 +250,13 @@ export default class CustomBulletDragPlugin extends Plugin {
             } catch (err) {
                 console.warn("CustomBulletDrag: Could not remove preview element on mouseup.", err);
             }
+        }
+
+        // if not dropped over a canvas, skip link creation
+        if (dragging && !overCanvas) {
+            console.log("CustomBulletDrag: Drop occurred outside a Canvas; skipping node creation.");
+            this.dragState = null;
+            return;
         }
 
         this.dragState = null;
