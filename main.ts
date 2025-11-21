@@ -13,6 +13,7 @@ interface DragState {
     rawLineText: string; // Raw text content of the dragged line
     // Track if pointer is over a canvas and store a reference to the icon span.
     overCanvas: boolean;
+    targetEditor: Editor | null; // The editor we're hovering over (null if not over another editor)
     iconSpan: HTMLElement | null;
 }
 
@@ -142,6 +143,7 @@ export default class CustomBulletDragPlugin extends Plugin {
             lineNumber: lineNumber,
             rawLineText: rawLineText,
             overCanvas: false,
+            targetEditor: null,
             iconSpan: null,
         };
 
@@ -224,9 +226,33 @@ export default class CustomBulletDragPlugin extends Plugin {
                     }
                 }
             }
+            
+            // check if mouse is over a markdown editor (excluding the source editor)
+            let targetEditor: Editor | null = null;
+            const markdownLeaves = this.app.workspace.getLeavesOfType("markdown");
+            for (const leaf of markdownLeaves) {
+                const markdownView = leaf.view as MarkdownView;
+                if (markdownView && markdownView.editor && markdownView.editor !== this.dragState.editor && markdownView.containerEl) {
+                    const rect = markdownView.containerEl.getBoundingClientRect();
+                    if (e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+                        targetEditor = markdownView.editor;
+                        break;
+                    }
+                }
+            }
+            
             this.dragState.overCanvas = overCanvas;
+            this.dragState.targetEditor = targetEditor;
+            
             if (this.dragState.iconSpan) {
-                this.dragState.iconSpan.textContent = overCanvas ? "+" : "•";
+                // Show different icons based on drop target
+                if (overCanvas) {
+                    this.dragState.iconSpan.textContent = "+"; // Canvas node
+                } else if (targetEditor) {
+                    this.dragState.iconSpan.textContent = "📝"; // Markdown note
+                } else {
+                    this.dragState.iconSpan.textContent = "•"; // Default
+                }
             }
             e.preventDefault();
         }
@@ -238,7 +264,7 @@ export default class CustomBulletDragPlugin extends Plugin {
     onMouseUp = async (e: MouseEvent) => {
         if (!this.dragState) return;
 
-        const { editor, lineNumber, sourceEl, dragging, overCanvas } = this.dragState;
+        const { editor, lineNumber, sourceEl, dragging, overCanvas, targetEditor } = this.dragState;
         const initialRawLineText = this.dragState.rawLineText;
 
         sourceEl.style.userSelect = "";
@@ -252,9 +278,9 @@ export default class CustomBulletDragPlugin extends Plugin {
             }
         }
 
-        // if not dropped over a canvas, skip link creation
-        if (dragging && !overCanvas) {
-            console.log("CustomBulletDrag: Drop occurred outside a Canvas; skipping node creation.");
+        // if not dropped over a valid target, skip link creation
+        if (dragging && !overCanvas && !targetEditor) {
+            console.log("CustomBulletDrag: Drop occurred outside valid targets; skipping link creation.");
             this.dragState = null;
             return;
         }
@@ -265,7 +291,7 @@ export default class CustomBulletDragPlugin extends Plugin {
             console.log(`CustomBulletDrag: Dropped bullet from line ${lineNumber}: "${initialRawLineText}"`);
 
             if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)) {
-                console.error("CustomBulletDrag: Drop coordinates are non-finite. Cannot add node to canvas.", { clientX: e.clientX, clientY: e.clientY });
+                console.error("CustomBulletDrag: Drop coordinates are non-finite. Cannot process drop.", { clientX: e.clientX, clientY: e.clientY });
                 return;
             }
 
@@ -286,8 +312,13 @@ export default class CustomBulletDragPlugin extends Plugin {
                 const fileNameNoExt = file.name.replace(/\.md$/, "");
                 const linkReference = `![[${fileNameNoExt}#^${id}]]`;
 
-                console.log(`CustomBulletDrag: Creating canvas node with link: ${linkReference} at (${e.clientX}, ${e.clientY})`);
-                this.addCanvasNode(linkReference, e);
+                if (overCanvas) {
+                    console.log(`CustomBulletDrag: Creating canvas node with link: ${linkReference} at (${e.clientX}, ${e.clientY})`);
+                    this.addCanvasNode(linkReference, e);
+                } else if (targetEditor) {
+                    console.log(`CustomBulletDrag: Inserting link into markdown editor: ${linkReference}`);
+                    this.insertLinkIntoEditor(targetEditor, linkReference);
+                }
             } else {
                 console.log("CustomBulletDrag: Drop occurred but no valid markdown file context found.");
             }
@@ -355,6 +386,25 @@ export default class CustomBulletDragPlugin extends Plugin {
             }
         } else {
             console.log("CustomBulletDrag: No canvas found under drop coordinates.");
+        }
+    }
+
+    /**
+     * Inserts the block reference link at the cursor position in the target editor.
+     */
+    insertLinkIntoEditor(targetEditor: Editor, linkReference: string) {
+        try {
+            const cursor = targetEditor.getCursor();
+            targetEditor.replaceRange(linkReference, cursor);
+            // Move cursor to after the inserted link
+            const newCursor = {
+                line: cursor.line,
+                ch: cursor.ch + linkReference.length
+            };
+            targetEditor.setCursor(newCursor);
+            console.log(`CustomBulletDrag: Successfully inserted link "${linkReference}" into target editor at line ${cursor.line}, ch ${cursor.ch}`);
+        } catch (error) {
+            console.error("CustomBulletDrag: Failed to insert link into target editor:", error);
         }
     }
 }
